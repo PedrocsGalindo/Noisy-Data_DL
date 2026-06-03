@@ -1,115 +1,124 @@
 """Cross Entropy loss helpers."""
-
-from torch.utils.data import DataLoader
-from torchvision import transforms, models
 import torch.nn as nn
 import torch
 
+from src.utils.checkpoint import save_checkpoint, load_checkpoint
+from src.routes import ROOT
 
-class CrossEntropyMethod(nn.Module):
-    """Compatibility wrapper for older method-based training code."""
 
-    def __init__(self, config=None):
+class CrossEntropyMethod():
+
+    def __init__(self, config, model, device):
         super().__init__()
+        self.config = config
+        self.num_class = config.num_class
+        self.device = device
+        self.epochs = config.epochs
+        self.lr = config.lr
+        backbone = (config.model).backbone
+        self.checkpoint_path = ROOT / "outputs" / "checkpoint" / f"{backbone}_ce"
+
+
+        model.fc = nn.Linear(model.fc.in_features, self.num_classes)
+        self.model = model.to(device)
+
         self.criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20], gamma=0.1)
-        optimizer = torch.optim.SGD(params=model.parameters(),
-                                         lr=args.lr,
+        self.optimizer = torch.optim.SGD(params=model.parameters(),
+                                         lr=self.lr,
                                          momentum=0.9,
                                          nesterov=True)
+        
+        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=[10, 20], gamma=0.1)
+                                         
+    def train(self, train_loader, val_loader):
+        start_epoch = 0
 
-    def compute_loss(self, model, images, targets):
-        logits = model(images)
-        loss = self.loss_fn(logits, targets)
-        return loss, logits
+        # checkpoint existente
+        try:
+            checkpoint = torch.load(self.checkpoint_path, map_location=self.device)
 
-    def validation_loss(self, logits, targets):
-        return self.loss_fn(logits, targets)
+            self.model.load_state_dict(checkpoint["model_state_dict"])
+            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
+            start_epoch = checkpoint["epoch"] + 1
 
+            print(f"Checkpoint encontrado. Continuando do epoch {start_epoch}")
 
+        except FileNotFoundError as e:
+            print("Treinando pela primeira vez")
+            
+        
+        for epoch in range(start_epoch, self.epochs):
+                self.model.train()
 
-model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
-model.fc = nn.Linear(model.fc.in_features, num_classes)
-model = model.to(device)
+                train_loss_sum = 0.0
+                train_correct = 0
+                train_total = 0
 
+                for imgs, labels in train_loader:
+                    imgs = imgs.to(self.device)
+                    labels = labels.long().to(self.device)
 
-# criterion = nn.CrossEntropyLoss()
-criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
+                    self.optimizer.zero_grad()
 
+                    pred = self.model(imgs)
+                    loss = self.criterion(pred, labels)
 
-# ----------------------  ----------------------
+                    loss.backward()
+                    self.optimizer.step()
 
-with open(txtfile, 'w') as f:
-    f.write('epoch train_acc val_acc test_acc\n')
+                    batch_size = imgs.size(0)
+                    train_loss_sum += loss.item() * batch_size
 
-# ----------------------  ----------------------
-def accuracy(loader):
-    model.eval()
-    total, correct = 0, 0
-    with torch.no_grad():
-        for imgs, labels, *_ in loader:
-            imgs, labels = imgs.to(device), labels.to(device)
-            preds = model(imgs).argmax(1)
-            total   += labels.size(0)
-            correct += (preds == labels).sum().item()
-    return 100. * correct / total
+                    predicted_classes = pred.argmax(dim=1)
+                    train_correct += (predicted_classes == labels).sum().item()
+                    train_total += batch_size
 
-# ----------------------  ----------------------
-best_val_acc = 0.0
-test_at_best = 0.0
-best_test_acc = 0.0
-last5 = deque(maxlen=5)
+                train_loss = train_loss_sum / train_total
+                train_acc = train_correct / train_total
 
-for epoch in range(0, args.epochs):
-    model.train()
-    for imgs, labels, *_ in train_loader:
-        imgs = imgs.to(device)
-        labels = labels.long().to(device)
-        # print("imgs device:", imgs.device)
-        # print("labels type:", type(labels))
-        # if isinstance(labels, torch.Tensor):
-        #     print("labels device:", labels.device)
-        optimizer.zero_grad()
-        loss = criterion(model(imgs), labels)
-        loss.backward()
-        optimizer.step()
+                # validação
+                self.model.eval()
 
-    # 
-    tr_acc = accuracy(train_loader)
-    val_acc = accuracy(val_loader)
-    te_acc = accuracy(test_loader)
+                val_loss_sum = 0.0
+                val_correct = 0
+                val_total = 0
 
-    scheduler.step()
-    # 
-    if val_acc > best_val_acc:
-        best_val_acc = val_acc
-        test_at_best = te_acc
-    best_test_acc = max(best_test_acc, te_acc)
-    last5.append(te_acc)
+                with torch.no_grad():
+                    for imgs, labels in val_loader:
+                        imgs = imgs.to(self.device)
+                        labels = labels.long().to(self.device)
 
-    #  log
-    with open(txtfile, 'a') as f:
-        f.write(f'{epoch} {tr_acc:.4f} {val_acc:.4f} {te_acc:.4f}\n')
-    print(f'Epoch {epoch:03d}/{args.epochs} | train {tr_acc:.2f}%  val {val_acc:.2f}%  test {te_acc:.2f}%')
+                        pred = self.model(imgs)
+                        loss = self.criterion(pred, labels)
 
-    noise_rate_str = str(args.noise_rate).replace('.', '_')
-    save_dir = os.path.join("/mnt/ssd1/user/ce", args.dataset, args.noise_type, f"nr{noise_rate_str}")
-    os.makedirs(save_dir, exist_ok=True)
+                        batch_size = imgs.size(0)
+                        val_loss_sum += loss.item() * batch_size
 
-    # torch.save(model.state_dict(), os.path.join(save_dir, f'model_epoch{epoch}.pth'))
+                        predicted_classes = pred.argmax(dim=1)
+                        val_correct += (predicted_classes == labels).sum().item()
+                        val_total += batch_size
 
+                val_loss = val_loss_sum / val_total
+                acc = val_correct / val_total
 
-# ----------------------  ----------------------
-avg_last5 = sum(last5) / len(last5)
-print('\n======== Final Report ========')
-print(f'1) Val-best test acc : {test_at_best:.2f}%')
-print(f'2) Best   test acc   : {best_test_acc:.2f}%')
-print(f'3) Last-5 test avg   : {avg_last5:.2f}%')
+                print(
+                    f"Epoch [{epoch + 1}/{self.epochs}] "
+                    f"Train Loss: {train_loss:.4f} "
+                    f"Train Acc: {train_acc:.4f} "
+                    f"Val Loss: {val_loss:.4f} "
+                    f"Val Acc: {acc:.4f}"
+                )
 
-#  txt
-with open(txtfile, 'a') as f:
-    f.write('\n# Final Report\n')
-    f.write(f'val_best_test_acc {test_at_best:.3f}\n')
-    f.write(f'test_max_acc      {best_test_acc:.3f}\n')
-    f.write(f'test_last5_avg    {avg_last5:.3f}\n')
+                save_checkpoint(
+                    self.checkpoint_path,
+                    self.model,
+                    self.optimizer,
+                    epoch,
+                    val_loss,
+                    acc,
+                    getattr(self, "configs", {}),
+                )
+
+                self.scheduler.step(val_loss)
+        return self.model, (val_loss, acc)

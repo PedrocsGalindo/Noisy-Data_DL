@@ -38,13 +38,8 @@ class DummyRetinaDataset(Dataset):
 
         label = torch.tensor(self.labels[index], dtype=torch.long)
 
-        return {
-            "image": image,
-            "label": label,
-            "index": torch.tensor(int(index), dtype=torch.long),
-            "image_name": f"dummy_{index}.png",
-        }
-
+        return image, label
+    
 class KaggleDRDataset(Dataset):
     """Kaggle DR image dataset backed by trainLabels.csv."""
 
@@ -81,13 +76,9 @@ class KaggleDRDataset(Dataset):
             image = Image.new("RGB", (self.image_size, self.image_size), color=(128, 128, 128))
         else:
             raise FileNotFoundError(f"Missing image file: {image_path}")
-
-        return {
-            "image": self.transform(image),
-            "label": torch.tensor(int(label), dtype=torch.long),
-            "index": torch.tensor(int(index), dtype=torch.long),
-            "image_name": filename,
-        }
+        image = self.transform(image)
+        label = torch.tensor(int(label), dtype=torch.long)
+        return image, label
 
 def build_train_transforms(imafe_size):
     return transforms.Compose([

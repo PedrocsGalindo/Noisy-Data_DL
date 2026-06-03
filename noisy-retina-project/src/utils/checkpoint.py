@@ -5,17 +5,17 @@ from pathlib import Path
 import torch
 
 
-def save_checkpoint(path, model, optimizer, epoch, metrics, config):
-    """Save model, optimizer, epoch, metrics, and config."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+def save_checkpoint(save_path, model, optimizer, epoch, loss, acc, config):
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
     torch.save(
         {
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "epoch": int(epoch),
-            "metrics": metrics,
+            "loss": float(loss),
+            "acc": float(acc),
             "config": config,
         },
-        path,
+        save_path,
     )
