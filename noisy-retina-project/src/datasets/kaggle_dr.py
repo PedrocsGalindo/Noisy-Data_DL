@@ -27,6 +27,7 @@ class DummyRetinaDataset(Dataset):
 
     def __getitem__(self, index):
         generator = torch.Generator().manual_seed(int(index))
+
         image = torch.rand(
             3,
             self.image_size,
@@ -34,8 +35,15 @@ class DummyRetinaDataset(Dataset):
             generator=generator,
             dtype=torch.float32,
         )
+
         label = torch.tensor(self.labels[index], dtype=torch.long)
-        return image, label
+
+        return {
+            "image": image,
+            "label": label,
+            "index": torch.tensor(int(index), dtype=torch.long),
+            "image_name": f"dummy_{index}.png",
+        }
 
 class KaggleDRDataset(Dataset):
     """Kaggle DR image dataset backed by trainLabels.csv."""
@@ -105,58 +113,110 @@ def build_val_transforms(image_size):
 
 # MAIN func 
 def build_dataloaders(config):
-    """Build train and validation dataloaders from a YAML config dict."""
+    """Build train, validation and test dataloaders from config."""
+
     mode = config.get("name", "dummy")
     seed = config.get("seed", 42)
-    num_classes = config.get("num_classes", config.get("num_classes", 5))
+    num_classes = config.get("num_classes", 5)
+    image_size = config.get("image_size", 64)
     val_size = config.get("val_size", 0.1)
     test_size = config.get("test_size", 0.3)
-    num_classes= config.num_classes
-    batch_size = config.get("batch_size", 16 )
+    batch_size = config.get("batch_size", 16)
 
-    csv_path = getattr(config, "csv_path", "")
-    metadata = pd.read_csv(DATA_PATH/ csv_path)
-    labels = metadata["level"].astype(int).tolist()
-    images_name = metadata["image"]
-    X_train, X_test, y_train, y_test = train_test_split(
-        images_name,
-        labels,
-        test_size=test_size,
-        random_state=seed
-    )
-    val_size = int(len(X_train) * val_size) 
     if mode == "dummy":
         dataset = DummyRetinaDataset(
             num_samples=config.get("num_samples", 24),
             num_classes=num_classes,
             image_size=image_size,
         )
+
+        num_samples = len(dataset)
+
+        generator = torch.Generator().manual_seed(seed)
+        indices = torch.randperm(num_samples, generator=generator).tolist()
+
+        n_test = int(num_samples * test_size)
+        n_val = int(num_samples * val_size)
+
+        test_idx = indices[:n_test]
+        val_idx = indices[n_test:n_test + n_val]
+        train_idx = indices[n_test + n_val:]
+
         train_dataset = Subset(dataset, train_idx)
         val_dataset = Subset(dataset, val_idx)
+        test_dataset = Subset(dataset, test_idx)
 
     elif mode == "kaggle_dr":
+        csv_path = getattr(config, "csv_path", "")
+        metadata = pd.read_csv(DATA_PATH / csv_path)
+
+        labels = metadata["level"].astype(int).tolist()
+        images_name = metadata["image"].tolist()
+
+        X_train, X_test, y_train, y_test = train_test_split(
+            images_name,
+            labels,
+            test_size=test_size,
+            random_state=seed,
+            stratify=labels,
+        )
+
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_train,
+            y_train,
+            test_size=val_size,
+            random_state=seed,
+            stratify=y_train,
+        )
+
         train_dataset = KaggleDRDataset(
-            images=X_train[:val_size],
-            labels=y_train[:val_size],
+            images=X_train,
+            labels=y_train,
             config=config,
-            train=True
+            train=True,
         )
+
         val_dataset = KaggleDRDataset(
-            images=X_train[val_size:],
-            labels=y_train[val_size:],
+            images=X_val,
+            labels=y_val,
             config=config,
-            train=False
+            train=False,
         )
+
         test_dataset = KaggleDRDataset(
             images=X_test,
             labels=y_test,
             config=config,
-            train=False
+            train=False,
         )
+
     else:
         raise ValueError(f"Unknown dataset mode: {mode}")
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=4)
-    val_loader   = DataLoader(val_dataset,   batch_size=batch_size, shuffle=False, num_workers=4)
-    test_loader  = DataLoader(test_dataset,  batch_size=batch_size, shuffle=False, num_workers=4)
+    num_workers = config.get("num_workers", 0)
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=False,
+        num_workers=num_workers,
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        num_workers=num_workers,
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        num_workers=num_workers,
+    )
+
     return train_loader, val_loader, test_loader

@@ -1,29 +1,27 @@
 seed: 42
 
-dataset:
-  name: kaggle_dr
-  csv_path: data/smoke/trainLabels.csv
-  image_dir: data/smoke/images
-  image_size: 224
-  max_samples: 32
-  allow_missing_images: true
+name: kaggle_dr
+csv_path: data/smoke/trainLabels.csv
+image_dir: data/smoke/images
+image_size: 224
+max_samples: 32
+allow_missing_images: true
+
+method: sce
+batch_size: 4
+epochs: 1
+lr: 0.0001
+weight_decay: 0.0001
+test_size: 0.3
+val_size: 0.1
+num_workers: 0
+sce_alpha: 1.0
+sce_beta: 1.0
 
 model:
   backbone: resnet18
   num_classes: 5
   pretrained: true
-
-train:
-  method: sce
-  batch_size: 4
-  epochs: 1
-  lr: 0.0001
-  weight_decay: 0.0001
-  test_size: 0.3
-  val_size: 0.1
-  num_workers: 0
-  sce_alpha: 1.0
-  sce_beta: 1.0
 
 output:
   dir: outputs/smoke_sce
