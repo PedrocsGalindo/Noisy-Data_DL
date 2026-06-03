@@ -1,63 +1,48 @@
 """Symmetric Cross Entropy loss helpers."""
 
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
+class ConvBrunch(nn.Module):
+    def __init__(self, in_planes, out_planes, kernel_size=3):
+        super(ConvBrunch, self).__init__()
+        padding = (kernel_size - 1) // 2
+        self.out_conv = nn.Sequential(
+            nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, padding=padding),
+            nn.BatchNorm2d(out_planes),
+            nn.ReLU())
 
-class SCELoss(nn.Module):
-    """Symmetric Cross Entropy: alpha * CE + beta * reverse CE."""
-
-    def __init__(
-        self,
-        num_classes=5,
-        alpha=1.0,
-        beta=1.0,
-        pred_min=1e-7,
-        label_min=1e-4,
-    ):
-        super().__init__()
-        self.num_classes = int(num_classes)
-        self.alpha = float(alpha)
-        self.beta = float(beta)
-        self.pred_min = float(pred_min)
-        self.label_min = float(label_min)
-        self.ce = nn.CrossEntropyLoss()
-
-    def forward(self, logits, targets):
-        ce = self.ce(logits, targets)
-
-        pred = torch.softmax(logits, dim=1)
-        pred = torch.clamp(pred, min=self.pred_min, max=1.0)
-
-        label_one_hot = F.one_hot(targets, num_classes=self.num_classes).float()
-        label_one_hot = torch.clamp(label_one_hot, min=self.label_min, max=1.0)
-
-        rce = -torch.sum(pred * torch.log(label_one_hot), dim=1)
-        rce = rce.mean()
-
-        return self.alpha * ce + self.beta * rce
-
+    def forward(self, x):
+        return self.out_conv(x)
 
 class SCEMethod(nn.Module):
-    """Compatibility wrapper for older method-based training code."""
+    def __init__(self):
+        super(SCEMethod, self).__init__()
+        self.block1 = nn.Sequential(
+            ConvBrunch(3, 64, 3),
+            ConvBrunch(64, 64, 3),
+            nn.MaxPool2d(kernel_size=2, stride=2))
+        self.block2 = nn.Sequential(
+            ConvBrunch(64, 128, 3),
+            ConvBrunch(128, 128, 3),
+            nn.MaxPool2d(kernel_size=2, stride=2))
+        self.block3 = nn.Sequential(
+            ConvBrunch(128, 196, 3),
+            ConvBrunch(196, 196, 3),
+            nn.MaxPool2d(kernel_size=2, stride=2))
+        # self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc1 = nn.Sequential(
+            nn.Linear(3136, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU())
+        self.fc2 = nn.Linear(256, 10)
 
-    def __init__(self, config):
-        super().__init__()
-        method_config = config.get("method", {})
-        train_config = config.get("train", {})
-        model_config = config.get("model", {})
-        num_classes = model_config.get("num_classes", config.get("num_classes", 5))
-        self.loss_fn = SCELoss(
-            num_classes=num_classes,
-            alpha=train_config.get("sce_alpha", method_config.get("alpha", 1.0)),
-            beta=train_config.get("sce_beta", method_config.get("beta", 1.0)),
-        )
+    def forward(self, x):
+        x = self.block1(x)
+        x = self.block2(x)
+        x = self.block3(x)
+        # x = self.global_avg_pool(x)
+        x = x.view(-1, 3136)
+        x = self.fc1(x)
+        x = self.fc2(x)
+        return x
 
-    def compute_loss(self, model, images, targets):
-        logits = model(images)
-        loss = self.loss_fn(logits, targets)
-        return loss, logits
-
-    def validation_loss(self, logits, targets):
-        return self.loss_fn(logits, targets)

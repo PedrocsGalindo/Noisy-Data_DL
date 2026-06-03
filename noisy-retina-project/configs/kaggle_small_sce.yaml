@@ -2,10 +2,10 @@ seed: 42
 
 dataset:
   name: kaggle_dr
-  csv_path: /kaggle/input/diabetic-retinopathy-detection/trainLabels.csv
-  image_dir: /kaggle/input/diabetic-retinopathy-detection/train
+  csv_path: /kaggle/input/samples/trainLabels.csv
+  image_dir: /kaggle/input/samples/images
   image_size: 224
-  max_samples: 512
+  max_samples: 20
   allow_missing_images: false
 
 model:
@@ -19,7 +19,8 @@ train:
   epochs: 1
   lr: 0.0001
   weight_decay: 0.0001
-  val_split: 0.2
+  test_size: 0.3
+  val_size: 0.1
   num_workers: 2
   sce_alpha: 1.0
   sce_beta: 1.0
