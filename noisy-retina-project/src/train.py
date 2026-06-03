@@ -17,7 +17,6 @@ from src.methods.ce import CrossEntropyMethod
 from src.methods.qmix_like import QMixLikeHelper
 from src.models.resnet import build_model
 from src.utils.checkpoint import save_checkpoint
-from src.utils.metrics import accuracy
 from src.utils.seed import set_seed
 
 
@@ -62,7 +61,7 @@ def main():
         method = CrossEntropyMethod(config, model, device)
 
     model, results = method.train(train_loader, val_loader)
-    test(model, test_loader)
+    test_loss, test_acc, all_preds, all_labels = test(model, test_loader)
 
 
 if __name__ == "__main__":

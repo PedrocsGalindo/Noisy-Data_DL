@@ -122,3 +122,53 @@ class CrossEntropyMethod():
 
                 self.scheduler.step(val_loss)
         return self.model, (val_loss, acc)
+    
+def test(self, test_loader):
+    try:
+        checkpoint = torch.load(self.checkpoint_path, map_location=self.device)
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        print(f"Checkpoint carregado para teste: {self.checkpoint_path}")
+
+    except FileNotFoundError:
+        print("Nenhum checkpoint encontrado. Testando com o modelo atual.")
+
+    self.model.eval()
+
+    test_loss_sum = 0.0
+    test_correct = 0
+    test_total = 0
+
+    all_preds = []
+    all_labels = []
+
+    with torch.no_grad():
+        for imgs, labels in test_loader:
+            imgs = imgs.to(self.device)
+            labels = labels.long().to(self.device)
+
+            pred = self.model(imgs)
+            loss = self.criterion(pred, labels)
+
+            batch_size = imgs.size(0)
+            test_loss_sum += loss.item() * batch_size
+
+            predicted_classes = pred.argmax(dim=1)
+
+            test_correct += (predicted_classes == labels).sum().item()
+            test_total += batch_size
+
+            all_preds.append(predicted_classes.cpu())
+            all_labels.append(labels.cpu())
+
+    test_loss = test_loss_sum / test_total
+    test_acc = test_correct / test_total
+
+    all_preds = torch.cat(all_preds)
+    all_labels = torch.cat(all_labels)
+
+    print(
+        f"Test Loss: {test_loss:.4f} "
+        f"Test Acc: {test_acc:.4f}"
+    )
+
+    return test_loss, test_acc, all_preds, all_labels
